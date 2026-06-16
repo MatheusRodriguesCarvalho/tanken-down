@@ -84,68 +84,107 @@ function destruirChunk(cx, cy) {
     }
 }
 
-// Retorna o Y do topo do terreno sólido abaixo do tanque.
-// Regra: busca de cima para baixo; o chunk válido é o primeiro sólido
-// cuja borda superior (gy) é MAIOR que o centro do tanque (tankY).
-// Isso garante: tanque não atravessa o solo, não teleporta para cima,
-// e cai corretamente dentro de buracos.
+// ─── Funções de terreno ────────────────────────────────────
+
+// IMPORTANTE: chunks do jogo existem apenas em Y = TERRENO_Y + N*CHUNK_SIZE
+// (200, 211, 222, 233...). Toda busca deve usar esses valores exatos.
+
+// Converte um Y qualquer para o índice de chunk correspondente (alinhado ao grid).
+function chunkGyEm(y) {
+    // Chunk que contém o Y: arredonda para baixo no grid do terreno
+    return TERRENO_Y + Math.floor((y - TERRENO_Y) / CHUNK_SIZE) * CHUNK_SIZE;
+}
+
+// Retorna o Y do topo do primeiro chunk sólido na coluna colX,
+// começando no chunk que contém startY e indo para baixo.
+// Garante que só verifica posições de chunk válidas (múltiplos alinhados a TERRENO_Y).
+function topoSuperficieEm(colX, startY) {
+    var cx = Math.floor(Math.max(0, Math.min(worldWidth - 1, colX)) / CHUNK_SIZE) * CHUNK_SIZE;
+    // Começa no chunk alinhado que contém startY, nunca antes de TERRENO_Y
+    var gyInicio = startY < TERRENO_Y ? TERRENO_Y : chunkGyEm(startY);
+    for (var gy = gyInicio; gy < 600; gy += CHUNK_SIZE) {
+        if (!isDestruido(cx, gy)) return gy;
+    }
+    return 600;
+}
+
+// Retorna o Y do topo do terreno sólido abaixo do tanque,
+// verificando três colunas (esquerda, centro, direita).
+// Busca a partir do fundo do tanque para nunca encontrar chão acima dele.
 function topoTerrenoAbaixo(tankX, tankY) {
+    var fundoTank = tankY + TANK_MEIO;
     var pontos = [
         tankX - TANK_MEIA_LARGURA + 2,
         tankX,
         tankX + TANK_MEIA_LARGURA - 2
     ];
-
     var melhorTopo = 600;
-
     for (var p = 0; p < pontos.length; p++) {
-        var px = Math.max(0, Math.min(worldWidth - 1, pontos[p]));
-        var cx = Math.floor(px / CHUNK_SIZE) * CHUNK_SIZE;
-
-        for (var gy = TERRENO_Y; gy < 600; gy += CHUNK_SIZE) {
-            if (!isDestruido(cx, gy)) {
-                // Só aceita como "chão" se a borda do chunk está abaixo do centro do tanque.
-                // Isso evita teleporte para cima E evita atravessar paredes.
-                if (gy > tankY) {
-                    if (gy < melhorTopo) melhorTopo = gy;
-                }
-                break; // para nesta coluna — este é o topo da superfície
-            }
-        }
+        var topo = topoSuperficieEm(pontos[p], fundoTank);
+        if (topo < melhorTopo) melhorTopo = topo;
     }
-
     return melhorTopo;
 }
 
-// Verifica se o tanque pode mover para novoX, com escalada suave de até 3 chunks.
-// Retorna { x, y } com a posição final (x bloqueado se parede muito alta,
-// y ajustado para subir suavemente rampas pequenas).
-var MAX_ESCALA_CHUNKS = 3; // quantos chunks o tanque consegue escalar
+// Retorna o Y do topo da superfície sólida na coluna colX,
+// buscando sempre do topo do terreno para baixo (ignora startY).
+// Uso: detectar altura de paredes para colisão horizontal.
+function topoSuperficieTotal(colX) {
+    var cx = Math.floor(Math.max(0, Math.min(worldWidth - 1, colX)) / CHUNK_SIZE) * CHUNK_SIZE;
+    for (var gy = TERRENO_Y; gy < 600; gy += CHUNK_SIZE) {
+        if (!isDestruido(cx, gy)) return gy;
+    }
+    return 600; // coluna completamente destruída
+}
+
+// Move o tanque horizontalmente com escalada de até MAX_ESCALA_CHUNKS.
+//
+// Algoritmo:
+// 1. Calcula nova posição X
+// 2. Verifica a altura do terreno na borda do tanque (direção do movimento)
+// 3. Se o terreno nessa coluna está ACIMA do fundo do tanque (há uma parede):
+//    a. Se a parede tem até MAX_ESCALA_CHUNKS de altura acima do chão atual → escala
+//    b. Caso contrário → bloqueia
+// 4. Se não há parede → move normalmente
+//
+// "Parede" = terreno cuja superfície está acima do fundo do tanque.
+// "Chão"   = terreno cuja superfície está no nível do fundo do tanque ou abaixo.
+var MAX_ESCALA_CHUNKS = 3;
 
 function moverTanqueX(tank, deltaX) {
     var novoX = Math.max(30, Math.min(worldWidth - 30, tank.x + deltaX));
+    if (novoX === tank.x) return { x: tank.x, y: tank.y };
 
-    // Encontra o chão na nova posição X
-    var topoNovo  = topoTerrenoAbaixo(novoX, tank.y);
-    var yAlvoNovo = topoNovo - TANK_MEIO;
+    // Fundo do tanque na posição atual
+    var fundoAtual = tank.y + TANK_MEIO;
 
-    // Chão atual do tanque
-    var topoAtual  = topoTerrenoAbaixo(tank.x, tank.y);
-    var yAlvoAtual = topoAtual - TANK_MEIO;
+    // Borda frontal do tanque na nova posição
+    var bordaX = deltaX > 0
+        ? novoX + TANK_MEIA_LARGURA - 1
+        : novoX - TANK_MEIA_LARGURA + 1;
 
-    // Diferença de altura entre a posição nova e a atual
-    // Negativo = terreno mais alto (subida), positivo = terreno mais baixo (descida)
-    var diffY = yAlvoNovo - yAlvoAtual;
+    // Topo do terreno na coluna da borda frontal
+    var topoParede = topoSuperficieTotal(bordaX);
 
-    // Se o terreno novo é mais alto que 3 chunks acima do atual: bloqueia
-    if (diffY < -(MAX_ESCALA_CHUNKS * CHUNK_SIZE)) {
-        return { x: tank.x, y: tank.y }; // bloqueado
+    // Se a superfície está acima do fundo do tanque → é uma parede ou degrau
+    if (topoParede < fundoAtual) {
+        // Y que o tanque precisaria ter para ficar em cima do terreno
+        var yEmCima = topoParede - TANK_MEIO;
+
+        // Quantos pixels o tanque precisaria subir
+        var subida = tank.y - yEmCima;
+
+        if (subida > 0 && subida <= MAX_ESCALA_CHUNKS * CHUNK_SIZE) {
+            // Degrau escalável: sobe e move
+            return { x: novoX, y: yEmCima };
+        } else {
+            // Parede alta demais: bloqueia
+            return { x: tank.x, y: tank.y };
+        }
     }
 
-    // Caso contrário: move e ajusta Y suavemente para o novo chão
-    // (descida: gravidade cuidará; subida suave: aplica o Y novo diretamente)
-    var novoY = yAlvoNovo < tank.y ? yAlvoNovo : tank.y; // só sobe se for escalar
-    return { x: novoX, y: novoY };
+    // Sem parede: move livremente (descida tratada pela gravidade no tick)
+    return { x: novoX, y: tank.y };
 }
 
 // ─── Física dos Tanques ────────────────────────────────────
@@ -155,17 +194,19 @@ function tickFisicaTanques() {
         var t = tanques[num];
         if (t.hp <= 0) return;
 
+        // Busca chão a partir do fundo atual do tanque
         var topo  = topoTerrenoAbaixo(t.x, t.y);
         var yAlvo = topo - TANK_MEIO;
 
         if (t.y >= yAlvo - 0.5) {
-            // Pousado — gruda no chão
+            // Pousado — gruda no chão e zera velocidade
             t.y  = yAlvo;
             t.vy = 0;
         } else {
-            // No ar — cai com gravidade
+            // No ar — aplica gravidade
             t.vy += GRAVIDADE;
             t.y  += t.vy;
+            // Clamp: não ultrapassa o chão
             if (t.y >= yAlvo) {
                 t.y  = yAlvo;
                 t.vy = 0;
