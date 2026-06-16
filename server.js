@@ -84,17 +84,19 @@ function destruirChunk(cx, cy) {
     }
 }
 
-// Retorna o Y do topo do primeiro chunk sólido na coluna x (coord absoluta de tela).
-// Verifica múltiplas colunas na largura do tanque e retorna o mais alto (menor Y).
-function topoTerrenoEm(tankX) {
-    var melhorTopo = 600; // padrão: caiu do mapa
-
-    // Verifica 3 pontos: esquerda, centro, direita do tanque
+// Retorna o Y do topo do terreno sólido abaixo do tanque.
+// Regra: busca de cima para baixo; o chunk válido é o primeiro sólido
+// cuja borda superior (gy) é MAIOR que o centro do tanque (tankY).
+// Isso garante: tanque não atravessa o solo, não teleporta para cima,
+// e cai corretamente dentro de buracos.
+function topoTerrenoAbaixo(tankX, tankY) {
     var pontos = [
         tankX - TANK_MEIA_LARGURA + 2,
         tankX,
         tankX + TANK_MEIA_LARGURA - 2
     ];
+
+    var melhorTopo = 600;
 
     for (var p = 0; p < pontos.length; p++) {
         var px = Math.max(0, Math.min(worldWidth - 1, pontos[p]));
@@ -102,14 +104,48 @@ function topoTerrenoEm(tankX) {
 
         for (var gy = TERRENO_Y; gy < 600; gy += CHUNK_SIZE) {
             if (!isDestruido(cx, gy)) {
-                // Encontrou chunk sólido — topo dele é gy
-                if (gy < melhorTopo) melhorTopo = gy;
-                break;
+                // Só aceita como "chão" se a borda do chunk está abaixo do centro do tanque.
+                // Isso evita teleporte para cima E evita atravessar paredes.
+                if (gy > tankY) {
+                    if (gy < melhorTopo) melhorTopo = gy;
+                }
+                break; // para nesta coluna — este é o topo da superfície
             }
         }
     }
 
-    return melhorTopo; // Y absoluto do topo do terreno sólido mais alto
+    return melhorTopo;
+}
+
+// Verifica se o tanque pode mover para novoX, com escalada suave de até 3 chunks.
+// Retorna { x, y } com a posição final (x bloqueado se parede muito alta,
+// y ajustado para subir suavemente rampas pequenas).
+var MAX_ESCALA_CHUNKS = 3; // quantos chunks o tanque consegue escalar
+
+function moverTanqueX(tank, deltaX) {
+    var novoX = Math.max(30, Math.min(worldWidth - 30, tank.x + deltaX));
+
+    // Encontra o chão na nova posição X
+    var topoNovo  = topoTerrenoAbaixo(novoX, tank.y);
+    var yAlvoNovo = topoNovo - TANK_MEIO;
+
+    // Chão atual do tanque
+    var topoAtual  = topoTerrenoAbaixo(tank.x, tank.y);
+    var yAlvoAtual = topoAtual - TANK_MEIO;
+
+    // Diferença de altura entre a posição nova e a atual
+    // Negativo = terreno mais alto (subida), positivo = terreno mais baixo (descida)
+    var diffY = yAlvoNovo - yAlvoAtual;
+
+    // Se o terreno novo é mais alto que 3 chunks acima do atual: bloqueia
+    if (diffY < -(MAX_ESCALA_CHUNKS * CHUNK_SIZE)) {
+        return { x: tank.x, y: tank.y }; // bloqueado
+    }
+
+    // Caso contrário: move e ajusta Y suavemente para o novo chão
+    // (descida: gravidade cuidará; subida suave: aplica o Y novo diretamente)
+    var novoY = yAlvoNovo < tank.y ? yAlvoNovo : tank.y; // só sobe se for escalar
+    return { x: novoX, y: novoY };
 }
 
 // ─── Física dos Tanques ────────────────────────────────────
@@ -119,29 +155,21 @@ function tickFisicaTanques() {
         var t = tanques[num];
         if (t.hp <= 0) return;
 
-        var topo   = topoTerrenoEm(t.x);
-        var yAlvo  = topo - TANK_MEIO; // centro do tanque quando pousado
+        var topo  = topoTerrenoAbaixo(t.x, t.y);
+        var yAlvo = topo - TANK_MEIO;
 
-        if (t.y < yAlvo - 0.5) {
-            // Tanque no ar — aplica gravidade
-            t.vy += GRAVIDADE;
-            t.y  += t.vy;
-            if (t.y >= yAlvo) {
-                t.y  = yAlvo;
-                t.vy = 0;
-            }
-        } else if (t.y > yAlvo + 0.5) {
-            // Terreno sumiu embaixo (buraco) — deixa cair
-            t.vy += GRAVIDADE;
-            t.y  += t.vy;
-            if (t.y >= yAlvo) {
-                t.y  = yAlvo;
-                t.vy = 0;
-            }
-        } else {
-            // Já no chão correto
+        if (t.y >= yAlvo - 0.5) {
+            // Pousado — gruda no chão
             t.y  = yAlvo;
             t.vy = 0;
+        } else {
+            // No ar — cai com gravidade
+            t.vy += GRAVIDADE;
+            t.y  += t.vy;
+            if (t.y >= yAlvo) {
+                t.y  = yAlvo;
+                t.vy = 0;
+            }
         }
     });
 
@@ -338,8 +366,13 @@ io.on('connection', function(socket) {
         if (!slot || slot !== gameState.turno || gameState.fase !== 'jogando' || projetil) return;
         var t = tanques[slot];
         if (t.hp <= 0 || t.fuel <= 0) return;
-        t.x    = Math.max(30, Math.min(worldWidth - 30, t.x + d.direcao * 2));
-        t.fuel = Math.max(0, t.fuel - 0.5);
+        // Usa moverTanqueX para checar colisão e escalada de terreno
+        var resultado = moverTanqueX(t, d.direcao * 2);
+        if (resultado.x !== t.x || resultado.y !== t.y) {
+            t.x    = resultado.x;
+            t.y    = resultado.y;
+            t.fuel = Math.max(0, t.fuel - 0.5);
+        }
     });
 
     // ── Atirar ──
