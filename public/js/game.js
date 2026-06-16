@@ -51,9 +51,11 @@ class WaitingScene extends Phaser.Scene {
         });
 
         s.on('iniciarJogo', (d) => {
-            window._gameState = d.gameState;
-            window._tanques   = d.tanques;
-            window._worldWidth = d.worldWidth;
+            window._gameState         = d.gameState;
+            window._gameState.nomeP1  = d.nomeP1 || d.gameState.nomeP1;
+            window._gameState.nomeP2  = d.nomeP2 || d.gameState.nomeP2;
+            window._tanques            = d.tanques;
+            window._worldWidth         = d.worldWidth;
             this.scene.start('GameScene');
         });
 
@@ -152,9 +154,11 @@ class MainMenu extends Phaser.Scene {
         });
 
         s.on('iniciarJogo', (d) => {
-            window._gameState  = d.gameState;
-            window._tanques    = d.tanques;
-            window._worldWidth = d.worldWidth;
+            window._gameState         = d.gameState;
+            window._gameState.nomeP1  = d.nomeP1 || d.gameState.nomeP1;
+            window._gameState.nomeP2  = d.nomeP2 || d.gameState.nomeP2;
+            window._tanques            = d.tanques;
+            window._worldWidth         = d.worldWidth;
             this.scene.start('GameScene');
         });
 
@@ -238,8 +242,9 @@ class GameScene extends Phaser.Scene {
         this.projetilSprite = null;
 
         // ── Nomes vindos do servidor (fonte única de verdade) ──
-        this.nomeP1 = gs.nomeP1 || 'JOGADOR 1';
-        this.nomeP2 = gs.nomeP2 || 'JOGADOR 2';
+        // Lê do gameState atualizado — garante que P2 também recebe os nomes corretos
+        this.nomeP1 = (window._gameState && window._gameState.nomeP1) || gs.nomeP1 || 'JOGADOR 1';
+        this.nomeP2 = (window._gameState && window._gameState.nomeP2) || gs.nomeP2 || 'JOGADOR 2';
 
         // Câmera e fundo
         this.cameras.main.setBounds(0, 0, ww, 600);
@@ -546,9 +551,11 @@ class GameOver extends Phaser.Scene {
         var s = window._socket;
         s.off('iniciarJogo'); s.off('jogadorSaiu');
         s.on('iniciarJogo', (d) => {
-            window._gameState  = d.gameState;
-            window._tanques    = d.tanques;
-            window._worldWidth = d.worldWidth;
+            window._gameState         = d.gameState;
+            window._gameState.nomeP1  = d.nomeP1 || d.gameState.nomeP1;
+            window._gameState.nomeP2  = d.nomeP2 || d.gameState.nomeP2;
+            window._tanques            = d.tanques;
+            window._worldWidth         = d.worldWidth;
             this.scene.start('GameScene');
         });
         s.on('jogadorSaiu', () => this.scene.start('WaitingScene'));

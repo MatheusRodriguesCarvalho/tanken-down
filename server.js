@@ -326,7 +326,9 @@ io.on('connection', function(socket) {
         io.emit('iniciarJogo', {
             gameState:  gameState,
             tanques:    tanques,
-            worldWidth: worldWidth
+            worldWidth: worldWidth,
+            nomeP1:     gameState.nomeP1,
+            nomeP2:     gameState.nomeP2
         });
     });
 
@@ -375,6 +377,7 @@ io.on('connection', function(socket) {
     });
 });
 
-server.listen(8081, function() {
-    console.log('Tanken Down rodando em http://localhost:8081');
+var PORT = process.env.PORT || 8081;
+server.listen(PORT, function() {
+    console.log('Tanken Down rodando na porta ' + PORT);
 });
