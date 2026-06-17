@@ -68,9 +68,9 @@ class MainMenu extends Phaser.Scene {
     constructor() { super('MainMenu'); }
 
     preload() {
-        this.load.image('bg_fundo', 'assets/sky.png');
-        this.load.image('bg_pedra', 'assets/soil.png');
-        this.load.image('bg_grama', 'assets/grass.png');
+        this.load.image('bg_fundo', 'assets/bg/sky.png');
+        this.load.image('bg_pedra', 'assets/bg/stone_tile.png');
+        this.load.image('bg_grama', 'assets/bg/grass_tile.png');
     }
 
     create() {
@@ -283,10 +283,11 @@ class GameScene extends Phaser.Scene {
     constructor() { super('GameScene'); }
 
     preload() {
-        this.load.image('groundTexture', 'assets/soil.png');
+        this.load.image('groundTexture', 'assets/bg/soil_tile.png');
+        this.load.image('groundTop',     'assets/bg/grass_tile.png');
         this.load.image('tank1Sprite',   'assets/tank1.png');
         this.load.image('tank2Sprite',   'assets/tank2.png');
-        this.load.image('bg_sky',        'assets/sky.png');
+        this.load.image('bg_sky',        'assets/bg/sky.png');
     }
 
     create() {
@@ -316,14 +317,24 @@ class GameScene extends Phaser.Scene {
         this.cameras.main.setBackgroundColor('#6688aa');
         this.add.image(ww / 2, 300, 'bg_sky').setDisplaySize(ww, 600).setDepth(0);
 
-        // Terreno visual
+        // Terreno visual — tile de 512x512 repetido sem distorção
         this.terrain = this.add.renderTexture(0, 200, ww, 400).setOrigin(0, 0).setDepth(1);
-        this.terrain.fill(0x663300);
-        for (var i = 0; i < ww; i += 400) this.terrain.draw('groundTexture', i, 0);
+        // Preenche com a textura de solo (512x512 tile)
+        for (var tx = 0; tx < ww; tx += 512) {
+            for (var ty = 0; ty < 400; ty += 512) {
+                this.terrain.draw('groundTexture', tx, ty);
+            }
+        }
+        // Faixa de grama no topo do terreno (primeiros ~40px)
+        this.grassStrip = this.add.renderTexture(0, 200, ww, 40).setOrigin(0, 0).setDepth(2);
+        for (var gx = 0; gx < ww; gx += 512) {
+            this.grassStrip.draw('groundTop', gx, 0);
+        }
 
         // Sprites dos tanques
-        this.sprite1 = this.add.image(this.tanques[1].x, this.tanques[1].y, 'tank1Sprite').setScale(0.2).setDepth(3);
-        this.sprite2 = this.add.image(this.tanques[2].x, this.tanques[2].y, 'tank2Sprite').setScale(0.2).setDepth(3);
+        // Tanques 1000x1000px → escala 0.08 = 80x80px em jogo
+        this.sprite1 = this.add.image(this.tanques[1].x, this.tanques[1].y, 'tank1Sprite').setScale(0.08).setDepth(3);
+        this.sprite2 = this.add.image(this.tanques[2].x, this.tanques[2].y, 'tank2Sprite').setScale(0.08).setDepth(3);
 
         // Gráficos
         this.aimGraphics = this.add.graphics().setDepth(6);
@@ -453,16 +464,35 @@ class GameScene extends Phaser.Scene {
 
     // Reaplica lista completa de chunks destruídos ao terreno visual
     reaplicarTerreno(chunks) {
-        // Limpa e redesenha do zero para evitar artefatos acumulados
-        this.terrain.clear();
-        this.terrain.fill(0x663300);
-        for (var i = 0; i < this.worldWidth; i += 400) this.terrain.draw('groundTexture', i, 0);
+        var ww = this.worldWidth;
 
-        // Apaga cada chunk destruído
+        // Redesenha terreno principal (soil_tile 512x512)
+        this.terrain.clear();
+        for (var tx = 0; tx < ww; tx += 512) {
+            for (var ty = 0; ty < 400; ty += 512) {
+                this.terrain.draw('groundTexture', tx, ty);
+            }
+        }
+
+        // Redesenha faixa de grama
+        if (this.grassStrip) {
+            this.grassStrip.clear();
+            for (var gx = 0; gx < ww; gx += 512) {
+                this.grassStrip.draw('groundTop', gx, 0);
+            }
+        }
+
+        // Apaga cada chunk destruído em ambas as texturas
         chunks.forEach((c) => {
-            var localY = c.cy - 200; // converte para coord local do RenderTexture
-            var rect = this.add.rectangle(0, 0, 11, 11, 0x000000).setVisible(false);
-            this.terrain.erase(rect, c.cx + 5.5, localY + 5.5);
+            var localY = c.cy - 200;
+            var rect = this.add.rectangle(0, 0, 12, 12, 0x000000).setVisible(false);
+            this.terrain.erase(rect, c.cx + 6, localY + 6);
+            // Apaga na faixa de grama também (só se for o primeiro nível, localY < 40)
+            if (this.grassStrip && localY < 40) {
+                var rect2 = this.add.rectangle(0, 0, 12, 12, 0x000000).setVisible(false);
+                this.grassStrip.erase(rect2, c.cx + 6, localY + 6);
+                rect2.destroy();
+            }
             rect.destroy();
         });
     }
