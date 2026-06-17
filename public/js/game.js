@@ -162,35 +162,100 @@ class MainMenu extends Phaser.Scene {
             this.scene.start('GameScene');
         });
 
-        s.on('jogadorSaiu', () => this.scene.start('WaitingScene'));
+        s.on('jogadorSaiu', () => { this.scene.start('WaitingScene'); });
         s.on('erroIniciar', (msg) => {
             this.add.text(400, 548, msg, { fontSize: '15px', fill: '#ff4444' }).setOrigin(0.5);
         });
     }
 
+    // Cria um campo de texto editável DENTRO do Phaser (sem DOM input).
+    // Usa um Phaser Text clicável + teclado para edição, completamente dentro do canvas.
     criarInput(x, y, valor, editavel) {
+        // Fundo do campo
+        var bg = this.add.rectangle(x, y, 140, 28, 0x1a1a1a).setStrokeStyle(2, 0x555555).setOrigin(0.5);
+
+        // Texto exibido
+        var txt = this.add.text(x, y, valor, {
+            fontSize: '13px', fill: editavel ? '#ffffff' : '#777777',
+            fontStyle: 'bold'
+        }).setOrigin(0.5);
+
+        // Cursor piscante (só para o campo ativo)
+        var cursor = this.add.text(0, y, '|', {
+            fontSize: '13px', fill: '#ffffff'
+        }).setOrigin(0.5).setVisible(false);
+
+        var obj = {
+            _valor: valor,
+            _ativo: false,
+            _cursor: cursor,
+            _txt: txt,
+            getValue: function() { return this._valor; },
+            setText: function(v) {
+                this._valor = v;
+                txt.setText(v);
+                this._atualizarCursor();
+            },
+            _atualizarCursor: function() {
+                var larguraTxt = txt.width;
+                cursor.setPosition(x + larguraTxt / 2 + 4, y);
+            }
+        };
+
         if (editavel) {
-            var el = document.createElement('input');
-            el.type = 'text'; el.value = valor; el.maxLength = 14;
-            var r  = this.sys.game.canvas.getBoundingClientRect();
-            var sx = r.width / 800, sy = r.height / 600;
-            el.style.cssText =
-                `position:absolute;width:${130*sx}px;height:${28*sy}px;` +
-                `font-size:${13*sy}px;text-align:center;font-weight:bold;` +
-                `background:#1a1a1a;color:#fff;border:2px solid #555;border-radius:4px;` +
-                `outline:none;z-index:10;` +
-                `left:${r.left + x*sx - 65*sx}px;top:${r.top + y*sy - 14*sy}px;`;
-            document.body.appendChild(el);
-            this._domInputs = this._domInputs || [];
-            this._domInputs.push(el);
-            el.addEventListener('input', () => this.enviarConfig());
-            return { getValue: () => el.value, setText: (v) => { el.value = v; } };
-        } else {
-            var t = this.add.text(x, y, valor, {
-                fontSize: '13px', fill: '#777', fontStyle: 'bold'
-            }).setOrigin(0.5);
-            return { getValue: () => t.text, setText: (v) => t.setText(v) };
+            // Clique ativa o campo
+            bg.setInteractive({ useHandCursor: true });
+            txt.setInteractive({ useHandCursor: true });
+
+            var ativar = () => {
+                // Desativa todos os outros campos primeiro
+                if (this._campoAtivo && this._campoAtivo !== obj) {
+                    this._campoAtivo._ativo = false;
+                    this._campoAtivo._cursor.setVisible(false);
+                    if (this._campoAtivo._piscaTween) this._campoAtivo._piscaTween.stop();
+                }
+                obj._ativo = true;
+                this._campoAtivo = obj;
+                cursor.setVisible(true);
+                obj._atualizarCursor();
+                // Piscar
+                if (obj._piscaTween) obj._piscaTween.stop();
+                obj._piscaTween = this.tweens.add({
+                    targets: cursor, alpha: 0, duration: 500,
+                    yoyo: true, repeat: -1
+                });
+            };
+
+            bg.on('pointerdown', ativar);
+            txt.on('pointerdown', ativar);
+
+            // Captura teclado
+            if (!this._teclado) {
+                this._teclado = this.input.keyboard.on('keydown', (e) => {
+                    if (!this._campoAtivo || !this._campoAtivo._ativo) return;
+                    var campo = this._campoAtivo;
+                    if (e.key === 'Backspace') {
+                        campo._valor = campo._valor.slice(0, -1);
+                    } else if (e.key === 'Tab' || e.key === 'Enter') {
+                        // Tab: passa para o próximo campo
+                        campo._ativo = false;
+                        campo._cursor.setVisible(false);
+                        if (campo._piscaTween) campo._piscaTween.stop();
+                        this._campoAtivo = null;
+                    } else if (e.key.length === 1 && campo._valor.length < 14) {
+                        campo._valor = (campo._valor + e.key).toUpperCase();
+                    }
+                    campo._txt.setText(campo._valor);
+                    campo._atualizarCursor();
+                    this.enviarConfig();
+                });
+            }
         }
+
+        this._phaserInputs = this._phaserInputs || [];
+        this._phaserInputs.push(obj);
+
+        return obj;
     }
 
     enviarConfig() {
@@ -204,8 +269,8 @@ class MainMenu extends Phaser.Scene {
     }
 
     shutdown() {
-        (this._domInputs || []).forEach(el => el.parentNode && el.parentNode.removeChild(el));
-        this._domInputs = [];
+        // Inputs são objetos Phaser — somem automaticamente com a cena.
+        // Só precisa remover os listeners de socket.
         var s = window._socket;
         if (s) { s.off('estadoAtualizado'); s.off('iniciarJogo'); s.off('jogadorSaiu'); s.off('erroIniciar'); }
     }
