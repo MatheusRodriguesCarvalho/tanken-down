@@ -67,7 +67,11 @@ function obterSlot(id) {
 
 function gerarVento() {
     if (!gameState.vento) { gameState.forcaVento = 0; return; }
-    gameState.forcaVento = parseFloat(((Math.random() - 0.5) * 0.002).toFixed(6));
+    // Direção aleatória independente da intensidade
+    var direcao    = Math.random() < 0.5 ? -1 : 1;
+    // Intensidade entre 0.0003 e 0.0012 (garante valor visível e variado)
+    var intensidade = 0.0003 + Math.random() * 0.0009;
+    gameState.forcaVento = parseFloat((direcao * intensidade).toFixed(6));
 }
 
 function chunkKey(cx, cy) { return cx + '_' + cy; }
